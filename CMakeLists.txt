@@ -1,43 +1,83 @@
 cmake_minimum_required(VERSION 3.15)
-project(ctsegmentation_src)
+project(gft)
 
-add_subdirectory(gft)
-
-set(SRC_OIFT
-    ${CMAKE_CURRENT_SOURCE_DIR}/oiftrelax.cpp
+file(GLOB_RECURSE GFT_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/gft/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gft/src/*.c"
 )
 
-add_executable(oiftrelax ${SRC_OIFT})
-target_include_directories(oiftrelax PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/gft/include)
-target_link_libraries(oiftrelax PRIVATE gft)
+add_library(gft STATIC ${GFT_SOURCES})
 
-option(CT_USE_STATIC_ZLIB "Prefer static zlib (if available in C:/libs/zlib/lib)" ON)
+target_include_directories(gft
+    PUBLIC BEFORE
+        ${CMAKE_CURRENT_SOURCE_DIR}/gft/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/gft/src
+)
 
-if(ZLIB_FOUND)
-    if(CT_USE_STATIC_ZLIB)
-        # prefer a static library if installed (zs.lib is produced by some zlib builds)
-        if(EXISTS "C:/libs/zlib/lib/zs.lib")
-            target_link_libraries(oiftrelax PRIVATE "C:/libs/zlib/lib/zs.lib")
-            target_include_directories(oiftrelax PRIVATE "C:/libs/zlib/include")
-        elseif(EXISTS "C:/libs/zlib/lib/zlibstatic.lib")
-            target_link_libraries(oiftrelax PRIVATE "C:/libs/zlib/lib/zlibstatic.lib")
-            target_include_directories(oiftrelax PRIVATE "C:/libs/zlib/include")
-        else()
-            target_link_libraries(oiftrelax PRIVATE ZLIB::ZLIB)
-        endif()
-    else()
-        target_link_libraries(oiftrelax PRIVATE ZLIB::ZLIB)
+# Robust zlib handling: prefer modern imported target, fallback to legacy names
+if (TARGET ZLIB::ZLIB)
+    target_link_libraries(gft PRIVATE ZLIB::ZLIB)
+elseif (TARGET zlibstatic)
+    add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    target_link_libraries(gft PRIVATE ZLIB::ZLIB)
+elseif (TARGET zlib)
+    add_library(ZLIB::ZLIB ALIAS zlib)
+    target_link_libraries(gft PRIVATE ZLIB::ZLIB)
+elseif (DEFINED ZLIB_FOUND AND ZLIB_FOUND)
+    if (DEFINED ZLIB_INCLUDE_DIRS)
+        target_include_directories(gft PRIVATE ${ZLIB_INCLUDE_DIRS})
     endif()
-endif()
-
-if(DEFINED ZLIB_INCLUDE_DIR)
-    target_include_directories(oiftrelax PRIVATE ${ZLIB_INCLUDE_DIR})
+    if (DEFINED ZLIB_LIBRARIES)
+        target_link_libraries(gft PRIVATE ${ZLIB_LIBRARIES})
+    endif()
+else()
+    target_compile_definitions(gft PRIVATE ZLIB_NOT_FOUND)
 endif()
 
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(oiftrelax PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(gft PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 if(MSVC)
-    target_compile_definitions(oiftrelax PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(gft PRIVATE
+        "/I${CMAKE_CURRENT_SOURCE_DIR}/gft/include"
+        "/I${CMAKE_CURRENT_SOURCE_DIR}/gft/src"
+    )
+else()
+    target_compile_options(gft PRIVATE
+        "-I${CMAKE_CURRENT_SOURCE_DIR}/gft/include"
+        "-I${CMAKE_CURRENT_SOURCE_DIR}/gft/src"
+    )
+endif()
+
+# oiftrelax executable (source lives at roift/oiftrelax.cpp)
+set(OIFTRELAX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/oiftrelax.cpp")
+if(EXISTS "${OIFTRELAX_SRC}")
+    add_executable(oiftrelax "${OIFTRELAX_SRC}")
+
+    # include the gft headers so oiftrelax builds
+    target_include_directories(oiftrelax PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/gft/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/gft/src
+    )
+
+    # link against the library produced here
+    target_link_libraries(oiftrelax PRIVATE gft)
+
+    # zlib linking: prefer imported target then legacy variables
+    if (TARGET ZLIB::ZLIB)
+        target_link_libraries(oiftrelax PRIVATE ZLIB::ZLIB)
+    elseif (TARGET zlib)
+        add_library(ZLIB::ZLIB ALIAS zlib)
+        target_link_libraries(oiftrelax PRIVATE ZLIB::ZLIB)
+    elseif (DEFINED ZLIB_LIBRARIES)
+        target_link_libraries(oiftrelax PRIVATE ${ZLIB_LIBRARIES})
+    else()
+        # no zlib found — keep building but define a macro so code can handle absence
+        target_compile_definitions(oiftrelax PRIVATE ZLIB_NOT_FOUND)
+    endif()
+
+    # Do NOT link ITK for oiftrelax (this tool depends only on zlib + gft)
+else()
+    message(STATUS "oiftrelax source not found at ${OIFTRELAX_SRC}; not building oiftrelax")
 endif()

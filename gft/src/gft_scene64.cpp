@@ -3,7 +3,7 @@
 
 extern "C" {
   #include "gft_bzlib.h"
-  #include "nifti1_io.h"
+  #include "nifti2_io.h"
 }
 
 

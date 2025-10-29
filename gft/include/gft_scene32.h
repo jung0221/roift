@@ -6,7 +6,7 @@
 #include "gft_image32.h"
 
 extern "C" {
-#include "nifti1_io.h"
+#include "nifti2_io.h"
 }
 
 namespace gft{

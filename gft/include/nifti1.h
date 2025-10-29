@@ -106,10 +106,10 @@
 
    SAMPLE CODES:
    ------------
-   The associated files nifti1_io.h and nifti1_io.c provide a sample
+   The associated files nifti2_io.h and nifti2_io.c provide a sample
    implementation in C of a set of functions to read, write, and manipulate
    NIFTI-1 files.  The file nifti1_test.c is a sample program that uses
-   the nifti1_io.c functions.
+   the nifti2_io.c functions.
 -----------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------*/
@@ -1164,7 +1164,7 @@ typedef struct { unsigned char r,g,b; } rgb_byte ;
      d = 0.25 * (R21-R12) / a       => quatern_d
 
    If a=0 (a 180 degree rotation), alternative formulas are needed.
-   See the nifti1_io.c function mat44_to_quatern() for an implementation
+   See the nifti2_io.c function mat44_to_quatern() for an implementation
    of the various cases in converting R to [a,b,c,d].
 
    Note that R-transpose (= R-inverse) would lead to the quaternion

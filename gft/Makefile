@@ -105,8 +105,8 @@ $(OBJ)/gft_draw.o \
 $(OBJ)/gft_band.o \
 $(OBJ)/gft_dicom.o \
 $(OBJ)/gft_bzlib.o \
-$(OBJ)/nifti1_io.o \
-$(OBJ)/znzlib.o
+$(OBJ)/nifti2_io.o \
+$(OBJ)/znzlib1.o
 	ar csr $(LIB)/libgft.a \
 $(OBJ)/gft_common.o \
 $(OBJ)/gft_adjrel.o \
@@ -182,8 +182,8 @@ $(OBJ)/gft_draw.o \
 $(OBJ)/gft_band.o \
 $(OBJ)/gft_dicom.o \
 $(OBJ)/gft_bzlib.o \
-$(OBJ)/nifti1_io.o \
-$(OBJ)/znzlib.o
+$(OBJ)/nifti2_io.o \
+$(OBJ)/znzlib1.o
 
 
 $(OBJ)/gft_common.o: $(SRC)/gft_common.cpp
@@ -410,11 +410,11 @@ $(OBJ)/gft_dicom.o: $(SRC)/gft_dicom.cpp
 $(OBJ)/gft_bzlib.o: $(SRC)/gft_bzlib.c
 	gcc $(FLAGS) -c $(SRC)/gft_bzlib.c -I$(INCLUDE) -o $(OBJ)/gft_bzlib.o
 
-$(OBJ)/znzlib.o: $(SRC)/znzlib.c
-	gcc $(FLAGS) -c $(SRC)/znzlib.c -I$(INCLUDE) -o $(OBJ)/znzlib.o 
+$(OBJ)/znzlib1.o: $(SRC)/znzlib1.c
+	gcc $(FLAGS) -c $(SRC)/znzlib1.c -I$(INCLUDE) -o $(OBJ)/znzlib1.o 
 
-$(OBJ)/nifti1_io.o: $(SRC)/nifti1_io.c
-	gcc $(FLAGS) -c $(SRC)/nifti1_io.c -I$(INCLUDE) -o $(OBJ)/nifti1_io.o
+$(OBJ)/nifti2_io.o: $(SRC)/nifti2_io.c
+	gcc $(FLAGS) -c $(SRC)/nifti2_io.c -I$(INCLUDE) -o $(OBJ)/nifti2_io.o
 
 
 clean:

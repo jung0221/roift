@@ -1,5 +1,5 @@
-/** \file nifti1_io.h
-    \brief Data structures for using nifti1_io API.
+/** \file nifti2_io.h
+    \brief Data structures for using nifti2_io API.
            - Written by Bob Cox, SSCC NIMH
            - Revisions by Rick Reynolds, SSCC NIMH
  */
@@ -16,7 +16,7 @@
 #define DONT_INCLUDE_ANALYZE_STRUCT  /*** not needed herein ***/
 #endif
 #include "nifti1.h"                  /*** NIFTI-1 header specification ***/
-#include "znzlib.h"
+#include "znzlib1.h"
 
 #define HAVE_ZLIB
 
@@ -27,7 +27,7 @@ extern "C" {
 /*=================*/
 
 /*****===================================================================*****/
-/*****         File nifti1_io.h == Declarations for nifti1_io.c          *****/
+/*****         File nifti2_io.h == Declarations for nifti2_io.c          *****/
 /*****...................................................................*****/
 /*****            This code is released to the public domain.            *****/
 /*****...................................................................*****/
@@ -82,7 +82,7 @@ typedef enum _analyze75_orient_code {
 
 /*! \struct nifti_image
     \brief High level data structure for open nifti datasets in the
-           nifti1_io API.  Note that this structure is not part of the
+           nifti2_io API.  Note that this structure is not part of the
            nifti1 format definition; it is used to implement one API
            for reading/writing formats in the nifti1 format.
  */
@@ -482,9 +482,9 @@ int    valid_nifti_extensions(const nifti_image *nim);
 #define NIFTI_MAX_FTYPE       3    /* this should match the maximum code */
 
 /*------------------------------------------------------------------------*/
-/*-- the rest of these apply only to nifti1_io.c, check for _NIFTI1_IO_C_ */
+/*-- the rest of these apply only to nifti2_io.c, check for _nifti2_io_C_ */
 /*                                                    Feb 9, 2005 [rickr] */
-#ifdef _NIFTI1_IO_C_
+#ifdef _nifti2_io_C_
 
 typedef struct {
     int debug;               /*!< debug level for status reports  */
@@ -534,7 +534,7 @@ typedef struct {
 
 #define LNI_MAX_NIA_EXT_LEN 100000  /* consider a longer extension invalid */
 
-#endif  /* _NIFTI1_IO_C_ section */
+#endif  /* _nifti2_io_C_ section */
 /*------------------------------------------------------------------------*/
 
 /*=================*/

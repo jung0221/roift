@@ -1,8 +1,8 @@
-#ifndef _ZNZLIB_H_
-#define _ZNZLIB_H_
+#ifndef _znzlib1_H_
+#define _znzlib1_H_
 
 /*
-znzlib.h  (zipped or non-zipped library)
+znzlib1.h  (zipped or non-zipped library)
 
 *****            This code is released to the public domain.            *****
 

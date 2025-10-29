@@ -1,4 +1,4 @@
-/** \file znzlib.c
+/** \file znzlib1.c
     \brief Low level i/o interface to compressed and noncompressed files.
         Written by Mark Jenkinson, FMRIB
 
@@ -21,10 +21,10 @@ NB: seeks for writable files with compression are quite restricted
 
  */
 
-#include "znzlib.h"
+#include "znzlib1.h"
 
 /*
-znzlib.c  (zipped or non-zipped library)
+znzlib1.c  (zipped or non-zipped library)
 
 *****            This code is released to the public domain.            *****
 
