@@ -77,20 +77,19 @@ if(EXISTS "${OIFTRELAX_SRC}")
         target_compile_definitions(oiftrelax PRIVATE ZLIB_NOT_FOUND)
     endif()
 
-    # Copy vcpkg runtime DLLs next to the oiftrelax executable so the tool
-    # can run standalone (e.g. zlib1.dll). Use the matching configuration's
-    # bin/ directory to avoid mixing Debug/Release runtimes.
-    set(_vcpkg_root "${CMAKE_SOURCE_DIR}/vcpkg_installed")
-    set(_vcpkg_bin_release "${_vcpkg_root}/x64-windows/bin")
-    set(_vcpkg_bin_debug "${_vcpkg_root}/x64-windows/debug/bin")
-    # Copying a single DLL avoids copying many unrelated runtime files.
-    add_custom_command(TARGET oiftrelax POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlib1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
-            "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
-        COMMENT "Copy zlib1.dll to oiftrelax target folder"
-    )
+    if (WIN32)
+        set(_vcpkg_root "${CMAKE_SOURCE_DIR}/vcpkg_installed")
+        set(_vcpkg_bin_release "${_vcpkg_root}/x64-windows/bin")
+        set(_vcpkg_bin_debug "${_vcpkg_root}/x64-windows/debug/bin")
+        # Copying a single DLL avoids copying many unrelated runtime files.
+        add_custom_command(TARGET oiftrelax POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlib1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
+                "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
+            COMMENT "Copy zlib1.dll to oiftrelax target folder"
+        )
+    endif()
 
     # Do NOT link ITK for oiftrelax (this tool depends only on zlib + gft)
 else()
