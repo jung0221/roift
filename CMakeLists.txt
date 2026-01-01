@@ -14,7 +14,6 @@ target_include_directories(gft
         ${CMAKE_CURRENT_SOURCE_DIR}/gft/src
 )
 
-# Robust zlib handling: prefer modern imported target, fallback to legacy names
 if (TARGET ZLIB::ZLIB)
     target_link_libraries(gft PRIVATE ZLIB::ZLIB)
 elseif (TARGET zlibstatic)
@@ -33,6 +32,7 @@ elseif (DEFINED ZLIB_FOUND AND ZLIB_FOUND)
 else()
     target_compile_definitions(gft PRIVATE ZLIB_NOT_FOUND)
 endif()
+
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(gft PRIVATE OpenMP::OpenMP_CXX)
