@@ -85,7 +85,7 @@ if(EXISTS "${OIFTRELAX_SRC}")
         add_custom_command(TARGET oiftrelax POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlib1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
+                "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlibd1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
                 "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
             COMMENT "Copy zlib1.dll to oiftrelax target folder"
         )
