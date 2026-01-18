@@ -81,17 +81,33 @@ if(EXISTS "${OIFTRELAX_SRC}")
         set(_vcpkg_root "${CMAKE_SOURCE_DIR}/vcpkg_installed")
         set(_vcpkg_bin_release "${_vcpkg_root}/x64-windows/bin")
         set(_vcpkg_bin_debug "${_vcpkg_root}/x64-windows/debug/bin")
-        # Copying a single DLL avoids copying many unrelated runtime files.
-        add_custom_command(TARGET oiftrelax POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlibd1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
-                "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
-            COMMENT "Copy zlib1.dll to oiftrelax target folder"
-        )
+        
+        # Determine the correct DLL filename based on configuration and existence
+        set(_zlib_dll_debug "${_vcpkg_bin_debug}/zlibd1.dll")
+        set(_zlib_dll_release "${_vcpkg_bin_release}/zlib1.dll")
+        
+        # Only add the copy command if the DLL files exist
+        if(EXISTS "${_zlib_dll_debug}" OR EXISTS "${_zlib_dll_release}")
+            add_custom_command(TARGET oiftrelax POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<$<CONFIG:Debug>:${_zlib_dll_debug}>$<$<NOT:$<CONFIG:Debug>>:${_zlib_dll_release}>"
+                    "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
+                COMMENT "Copy zlib1.dll to oiftrelax target folder"
+            )
+        else()
+            message(WARNING "ZLIB DLL not found in vcpkg_installed. DLL copy step will be skipped. Expected paths: ${_zlib_dll_debug} or ${_zlib_dll_release}")
+        endif()
     endif()
 
     # Do NOT link ITK for oiftrelax (this tool depends only on zlib + gft)
 else()
     message(STATUS "oiftrelax source not found at ${OIFTRELAX_SRC}; not building oiftrelax")
+endif()
+
+# OpenMP parallel version (optional)
+option(BUILD_PARALLEL_VERSION "Build OpenMP parallel version of gft" ON)
+if(BUILD_PARALLEL_VERSION AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gft_par")
+    add_subdirectory(gft_par)
+    message(STATUS "Building OpenMP parallel version in gft_par/")
 endif()
