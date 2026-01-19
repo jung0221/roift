@@ -50,8 +50,8 @@ def main():
     percentile = 0
 
     # Executáveis (ajuste os caminhos conforme necessário)
-    original_exe = Path("build/Release/oiftrelax.exe")
-    parallel_exe = Path("build/gft_par/Release/oiftrelax_parallel.exe")
+    original_exe = Path("build/Debug/oiftrelax.exe")
+    parallel_exe = Path("build/gft_par/Debug/oiftrelax_parallel.exe")
 
     # Verificar se arquivos existem
     if not volume.exists():
