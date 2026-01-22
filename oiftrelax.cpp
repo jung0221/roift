@@ -4,6 +4,85 @@
 #include <algorithm>
 #include <vector>
 #include <iostream>
+#include <chrono>
+#include <iomanip>
+#include <string>
+// ==================== DEBUG/TIMING UTILITIES ====================
+class DebugTimer
+{
+public:
+    struct Event
+    {
+        std::string name;
+        std::chrono::high_resolution_clock::time_point start_time;
+        double elapsed_ms;
+    };
+
+    static DebugTimer &getInstance()
+    {
+        static DebugTimer instance;
+        return instance;
+    }
+
+    void startEvent(const std::string &name)
+    {
+        Event evt;
+        evt.name = name;
+        evt.start_time = std::chrono::high_resolution_clock::now();
+        evt.elapsed_ms = 0.0;
+        events.push_back(evt);
+
+#ifdef _DEBUG
+        std::cout << "[DEBUG] >>> START: " << name << std::endl;
+#endif
+    }
+
+    void endEvent(const std::string &name)
+    {
+        auto now = std::chrono::high_resolution_clock::now();
+        for (auto &evt : events)
+        {
+            if (evt.name == name && evt.elapsed_ms == 0.0)
+            {
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - evt.start_time);
+                evt.elapsed_ms = duration.count();
+#ifdef _DEBUG
+                std::cout << "[DEBUG] <<< END: " << name << " | Elapsed: "
+                          << std::fixed << std::setprecision(2) << evt.elapsed_ms << " ms" << std::endl;
+#endif
+                return;
+            }
+        }
+    }
+
+    void printSummary()
+    {
+        std::cout << "\n"
+                  << std::string(60, '=') << std::endl;
+        std::cout << "TIMING SUMMARY" << std::endl;
+        std::cout << std::string(60, '=') << std::endl;
+        double total = 0.0;
+        for (const auto &evt : events)
+        {
+            if (evt.elapsed_ms > 0.0)
+            {
+                std::cout << std::left << std::setw(35) << evt.name
+                          << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+                          << evt.elapsed_ms << " ms" << std::endl;
+                total += evt.elapsed_ms;
+            }
+        }
+        std::cout << std::string(60, '-') << std::endl;
+        std::cout << std::left << std::setw(35) << "TOTAL"
+                  << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+                  << total << " ms" << std::endl;
+        std::cout << std::string(60, '=') << std::endl;
+    }
+
+private:
+    std::vector<Event> events;
+};
+// ================================================================
 
 gft::sScene32 *get_dilation_border(gft::sScene32 *scn, float radius_sphere)
 {
@@ -160,22 +239,36 @@ int main(int argc, char **argv)
 
     start = clock();
 
+    DebugTimer::getInstance().startEvent("GaussianBlur (1x)");
     fscn = gft::Scene32::GaussianBlur(scn);
+    DebugTimer::getInstance().endEvent("GaussianBlur (1x)");
+
+    DebugTimer::getInstance().startEvent("GaussianBlur (2x)");
     scn = fscn;
     fscn = gft::Scene32::GaussianBlur(scn);
-    //-----------------
-    // - radius sphere adjacency
+    DebugTimer::getInstance().endEvent("GaussianBlur (2x)");
+
     gft::Scene32::Destroy(&scn);
+
+    DebugTimer::getInstance().startEvent("OIFT (Oriented Image Foresting Transform)");
     gft::ift::OIFT(A, fscn, pol * 100.0, S, label);
-    //-----------------
+    DebugTimer::getInstance().endEvent("OIFT (Oriented Image Foresting Transform)");
+
+    DebugTimer::getInstance().startEvent("ORelax_1 (Relaxation - " + std::to_string(niter) + " iterations)");
     gft::ift::ORelax_1(A, fscn, pol * 100.0, S, label, niter);
-    // - percentile, % of dark intensities in dilation to be added as object
+    DebugTimer::getInstance().endEvent("ORelax_1 (Relaxation - " + std::to_string(niter) + " iterations)");
+
+    DebugTimer::getInstance().startEvent("Dilation Conditional");
     dilation_conditional(fscn, label, 1 /*radius sphere adj */, percentile /*percentile*/);
+    DebugTimer::getInstance().endEvent("Dilation Conditional");
+
     gft::Scene32::Destroy(&fscn);
 
     end = clock();
     totaltime = ((double)(end - start)) / CLOCKS_PER_SEC;
     // printf("Time: %f sec\n", totaltime);
+
+    DebugTimer::getInstance().printSummary();
 
     gft::Scene32::Write(label, output_file);
 

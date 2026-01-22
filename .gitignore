@@ -1,0 +1,10 @@
+# Nifti images
+nifti/
+*.nii.gz
+
+# build
+build/
+
+# Documentation 
+*.md
+*.pdf

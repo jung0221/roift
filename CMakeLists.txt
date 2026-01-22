@@ -1,6 +1,19 @@
 cmake_minimum_required(VERSION 3.15)
 project(gft)
 
+# Critical fix for MSB3025 error in Visual Studio
+# This prevents CMake from adding intermediate directories to copy operations
+set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY TRUE)
+set_property(GLOBAL PROPERTY USE_FOLDERS OFF)
+
+if(MSVC)
+    set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD FALSE)
+    # Force CMake to use simpler directory structure
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 file(GLOB_RECURSE GFT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gft/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gft/src/*.c"
@@ -8,8 +21,20 @@ file(GLOB_RECURSE GFT_SOURCES
 
 add_library(gft STATIC ${GFT_SOURCES})
 
+# Override per-target to fix MSB3025
+if(MSVC)
+    foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG_UPPER)
+        set_target_properties(gft PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/lib/${OUTPUTCONFIG}"
+            COMPILE_PDB_NAME_${OUTPUTCONFIG_UPPER} "gft"
+            COMPILE_PDB_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/lib/${OUTPUTCONFIG}"
+        )
+    endforeach()
+endif()
+
 target_include_directories(gft
-    PUBLIC BEFORE
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/gft/include
         ${CMAKE_CURRENT_SOURCE_DIR}/gft/src
 )
@@ -65,6 +90,7 @@ if(EXISTS "${OIFTRELAX_SRC}")
     target_link_libraries(oiftrelax PRIVATE gft)
 
     # zlib linking: prefer imported target then legacy variables
+    find_package(ZLIB REQUIRED)
     if (TARGET ZLIB::ZLIB)
         target_link_libraries(oiftrelax PRIVATE ZLIB::ZLIB)
     elseif (TARGET zlib)
@@ -77,21 +103,14 @@ if(EXISTS "${OIFTRELAX_SRC}")
         target_compile_definitions(oiftrelax PRIVATE ZLIB_NOT_FOUND)
     endif()
 
-    if (WIN32)
-        set(_vcpkg_root "${CMAKE_SOURCE_DIR}/vcpkg_installed")
-        set(_vcpkg_bin_release "${_vcpkg_root}/x64-windows/bin")
-        set(_vcpkg_bin_debug "${_vcpkg_root}/x64-windows/debug/bin")
-        # Copying a single DLL avoids copying many unrelated runtime files.
-        add_custom_command(TARGET oiftrelax POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "Copying zlib1.dll to oiftrelax folder"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<$<CONFIG:Debug>:${_vcpkg_bin_debug}/zlibd1.dll>$<$<NOT:$<CONFIG:Debug>>:${_vcpkg_bin_release}/zlib1.dll>"
-                "$<TARGET_FILE_DIR:oiftrelax>/zlib1.dll"
-            COMMENT "Copy zlib1.dll to oiftrelax target folder"
-        )
-    endif()
-
     # Do NOT link ITK for oiftrelax (this tool depends only on zlib + gft)
 else()
     message(STATUS "oiftrelax source not found at ${OIFTRELAX_SRC}; not building oiftrelax")
+endif()
+
+# OpenMP parallel version (optional)
+option(BUILD_PARALLEL_VERSION "Build OpenMP parallel version of gft" ON)
+if(BUILD_PARALLEL_VERSION AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gft_delta")
+    add_subdirectory(gft_delta)
+    message(STATUS "Building OpenMP parallel version in gft_delta/")
 endif()
