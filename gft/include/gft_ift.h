@@ -103,6 +103,13 @@ namespace gft{
 	      float per,
 	      int *S,
 	      sScene32 *label);
+
+    //Outer Cut (multi-label competition, label 0 as background):
+    void OIFT_Multi(sAdjRel3 *A,
+		    sScene32 *scn,
+		    float per,
+		    int *S,
+		    sScene32 *label);
     
     //Outer Cut:
     void OIFT(sScene32 *W,
@@ -430,6 +437,14 @@ namespace gft{
 		  sScene32 *label,
 		  int ntimes);
 
+    // ORelax with multi-label competition, preserving all labels from seeds.
+    void ORelax_1_Multi(sAdjRel3 *A,
+			sScene32 *scn,
+			float per,
+			int *S,
+			sScene32 *label,
+			int ntimes);
+
     void ORelax_1(sScene32 *W,
 		  sAdjRel3 *A,
 		  sScene32 *scn,
@@ -659,4 +674,3 @@ namespace gft{
 } //end gft namespace
 
 #endif
-

@@ -1,6 +1,7 @@
 
 #include "gft_ift.h"
 #include <queue>
+#include <vector>
 
 namespace gft
 {
@@ -884,6 +885,87 @@ namespace gft
 								per_pq = per;
 							else
 								per_pq = -per;
+
+							if (scn->data[p] > scn->data[q])
+								w *= (1.0 + per_pq / 100.0);
+							else if (scn->data[p] < scn->data[q])
+								w *= (1.0 - per_pq / 100.0);
+
+							if (w < value->data[q])
+							{
+								if (Q->L.elem[q].color == GRAY)
+									PQueue32::FastRemoveElem(Q, q);
+								value->data[q] = w;
+								label->data[q] = label->data[p];
+								PQueue32::FastInsertElem(Q, q);
+							}
+						}
+					}
+				}
+			}
+			Scene32::Destroy(&value);
+			PQueue32::Destroy(&Q);
+		}
+
+		// Outer Cut (multi-label competition, label 0 as background):
+		void OIFT_Multi(sAdjRel3 *A,
+						sScene32 *scn,
+						float per,
+						int *S,
+						sScene32 *label)
+		{
+			sPQueue32 *Q = NULL;
+			int i, p, q, n;
+			int w, Wmax;
+			sScene32 *value;
+			gft::Voxel u, v;
+			float per_pq;
+
+			value = Scene32::Create(scn);
+			n = label->n;
+			Wmax = gft::Scene32::GetMaximumValue(scn);
+			Wmax *= (1.0 + fabsf(per) / 100.0);
+			Q = PQueue32::Create(Wmax + 2, n, value->data);
+
+			for (p = 0; p < n; p++)
+			{
+				if (label->data[p] == NIL)
+					value->data[p] = INT_MAX;
+				else
+					value->data[p] = 0;
+			}
+
+			if (S != NULL)
+			{
+				for (i = 1; i <= S[0]; i++)
+					PQueue32::FastInsertElem(Q, S[i]);
+			}
+			else
+			{
+				for (p = 0; p < n; p++)
+					if (label->data[p] != NIL)
+						PQueue32::FastInsertElem(Q, p);
+			}
+
+			while (!PQueue32::IsEmpty(Q))
+			{
+				p = PQueue32::FastRemoveMinFIFO(Q);
+				u.c.x = gft::Scene32::GetAddressX(label, p);
+				u.c.y = gft::Scene32::GetAddressY(label, p);
+				u.c.z = gft::Scene32::GetAddressZ(label, p);
+
+				for (i = 1; i < A->n; i++)
+				{
+					v.v = u.v + A->d[i].v;
+					if (gft::Scene32::IsValidVoxel(label, v))
+					{
+						q = gft::Scene32::GetVoxelAddress(label, v);
+						if (Q->L.elem[q].color != BLACK)
+						{
+							w = abs(scn->data[p] - scn->data[q]);
+
+							// Label 0 is background (external), labels > 0 are object classes (internal).
+							per_pq = (label->data[p] == 0) ? -per : per;
 
 							if (scn->data[p] > scn->data[q])
 								w *= (1.0 + per_pq / 100.0);
@@ -8470,6 +8552,264 @@ namespace gft
 					label->data[p] = 1;
 			}
 
+			free(flabel_1);
+			free(flabel_2);
+			free(mask_nodes);
+			gft::Scene32::Destroy(&mask);
+		}
+
+		void ORelax_1_Multi(sAdjRel3 *A,
+							sScene32 *scn,
+							float per,
+							int *S,
+							sScene32 *label,
+							int ntimes)
+		{
+			sScene32 *mask;
+			float *flabel_1, *flabel_2, *tmp;
+			int *mask_nodes;
+			int n, p, q, i, j, k, nlast, ninic;
+			Voxel u, v;
+			float sw, w, per_pq, dmin;
+			float Wmax;
+			float *Dpq;
+			std::vector<int> class_labels;
+			std::vector<int> label_to_class;
+			std::vector<char> present;
+			int max_seed_label = 0;
+			int nclasses;
+			int bg_class = 0;
+			size_t total;
+
+			if (S == NULL || S[0] <= 0)
+			{
+				ORelax_1(A, scn, per, S, label, ntimes);
+				return;
+			}
+
+			for (i = 1; i <= S[0]; i++)
+			{
+				p = S[i];
+				if (p >= 0 && p < label->n)
+				{
+					max_seed_label = MAX(max_seed_label, label->data[p]);
+				}
+			}
+			max_seed_label = MAX(0, max_seed_label);
+
+			present.assign(max_seed_label + 1, 0);
+			present[0] = 1;
+			for (i = 1; i <= S[0]; i++)
+			{
+				p = S[i];
+				if (p >= 0 && p < label->n)
+				{
+					int lb = label->data[p];
+					if (lb >= 0 && lb <= max_seed_label)
+						present[lb] = 1;
+				}
+			}
+
+			for (i = 0; i <= max_seed_label; i++)
+				if (present[i])
+					class_labels.push_back(i);
+
+			if (class_labels.empty())
+				class_labels.push_back(0);
+
+			nclasses = (int)class_labels.size();
+			label_to_class.assign(max_seed_label + 1, -1);
+			for (i = 0; i < nclasses; i++)
+				label_to_class[class_labels[i]] = i;
+			bg_class = label_to_class[0];
+			if (bg_class < 0)
+				bg_class = 0;
+
+			//--------------------
+			dmin = MIN(scn->dx, MIN(scn->dy, scn->dz));
+			Dpq = (float *)malloc(A->n * sizeof(float));
+			for (i = 1; i < A->n; i++)
+			{
+				Dpq[i] = sqrtf(A->d[i].axis.x * A->d[i].axis.x * scn->dx * scn->dx +
+							   A->d[i].axis.y * A->d[i].axis.y * scn->dy * scn->dy +
+							   A->d[i].axis.z * A->d[i].axis.z * scn->dz * scn->dz) /
+						 dmin;
+			}
+			//--------------------
+			Wmax = (float)gft::Scene32::GetMaximumValue(scn);
+			Wmax *= (1.0 + fabsf(per) / 100.0);
+			ninic = 1;
+			n = label->n;
+			total = (size_t)n * (size_t)nclasses;
+			flabel_1 = (float *)calloc(total, sizeof(float));
+			flabel_2 = (float *)calloc(total, sizeof(float));
+			mask_nodes = (int *)malloc(sizeof(int) * (n + 1));
+			mask_nodes[0] = 0;
+			mask = gft::Scene32::Create(label);
+			gft::Scene32::Fill(mask, 0);
+
+			for (p = 0; p < n; p++)
+			{
+				size_t poff = (size_t)p * (size_t)nclasses;
+				int lb = label->data[p];
+				int c = bg_class;
+				if (lb >= 0 && lb <= max_seed_label && label_to_class[lb] >= 0)
+					c = label_to_class[lb];
+				flabel_1[poff + (size_t)c] = 1.0f;
+
+				u.c.x = gft::Scene32::GetAddressX(label, p);
+				u.c.y = gft::Scene32::GetAddressY(label, p);
+				u.c.z = gft::Scene32::GetAddressZ(label, p);
+				for (i = 1; i < A->n; i++)
+				{
+					v.v = u.v + A->d[i].v;
+					if (gft::Scene32::IsValidVoxel(label, v))
+					{
+						q = gft::Scene32::GetVoxelAddress(label, v);
+						if (label->data[p] != label->data[q])
+						{
+							mask->data[p] = 1;
+							mask_nodes[0]++;
+							mask_nodes[mask_nodes[0]] = p;
+							break;
+						}
+					}
+				}
+			}
+
+			while (ntimes > 0)
+			{
+				// Update class probabilities at boundary voxels:
+				memcpy(flabel_2, flabel_1, total * sizeof(float));
+				for (j = 1; j <= mask_nodes[0]; j++)
+				{
+					size_t poff;
+					p = mask_nodes[j];
+					u.c.x = gft::Scene32::GetAddressX(label, p);
+					u.c.y = gft::Scene32::GetAddressY(label, p);
+					u.c.z = gft::Scene32::GetAddressZ(label, p);
+					poff = (size_t)p * (size_t)nclasses;
+					for (k = 0; k < nclasses; k++)
+						flabel_2[poff + (size_t)k] = 0.0f;
+					sw = 0.0f;
+
+					for (i = 1; i < A->n; i++)
+					{
+						v.v = u.v + A->d[i].v;
+						if (gft::Scene32::IsValidVoxel(label, v))
+						{
+							size_t qoff;
+							float p_bg;
+							q = gft::Scene32::GetVoxelAddress(label, v);
+							qoff = (size_t)q * (size_t)nclasses;
+
+							w = fabsf((float)(scn->data[p] - scn->data[q]));
+							p_bg = flabel_1[qoff + (size_t)bg_class];
+							per_pq = per * (2.0f * p_bg - 1.0f);
+
+							if (scn->data[p] > scn->data[q])
+								w *= (1.0f + per_pq / 100.0f);
+							else if (scn->data[p] < scn->data[q])
+								w *= (1.0f - per_pq / 100.0f);
+
+							w = Wmax - w;
+							if (w < 0.0f)
+								w = 0.0f;
+							w = w * w;
+							w = w * w;
+							w = w * w;
+							w /= Dpq[i];
+
+							sw += w;
+							for (k = 0; k < nclasses; k++)
+								flabel_2[poff + (size_t)k] += w * flabel_1[qoff + (size_t)k];
+						}
+					}
+
+					if (sw > 0.0f)
+					{
+						for (k = 0; k < nclasses; k++)
+							flabel_2[poff + (size_t)k] /= sw;
+					}
+					else
+					{
+						for (k = 0; k < nclasses; k++)
+							flabel_2[poff + (size_t)k] = flabel_1[poff + (size_t)k];
+					}
+				}
+
+				tmp = flabel_1;
+				flabel_1 = flabel_2;
+				flabel_2 = tmp;
+
+				// Keep seeds hard-constrained.
+				for (i = 1; i <= S[0]; i++)
+				{
+					size_t poff;
+					int lb;
+					int c = bg_class;
+					p = S[i];
+					if (p < 0 || p >= n)
+						continue;
+					lb = label->data[p];
+					if (lb >= 0 && lb <= max_seed_label && label_to_class[lb] >= 0)
+						c = label_to_class[lb];
+					poff = (size_t)p * (size_t)nclasses;
+					for (k = 0; k < nclasses; k++)
+						flabel_1[poff + (size_t)k] = 0.0f;
+					flabel_1[poff + (size_t)c] = 1.0f;
+				}
+
+				ntimes--;
+
+				if (ntimes > 0)
+				{
+					// Dilate active mask:
+					nlast = mask_nodes[0];
+					for (j = ninic; j <= mask_nodes[0]; j++)
+					{
+						p = mask_nodes[j];
+						u.c.x = gft::Scene32::GetAddressX(label, p);
+						u.c.y = gft::Scene32::GetAddressY(label, p);
+						u.c.z = gft::Scene32::GetAddressZ(label, p);
+						for (i = 1; i < A->n; i++)
+						{
+							v.v = u.v + A->d[i].v;
+							if (gft::Scene32::IsValidVoxel(label, v))
+							{
+								q = gft::Scene32::GetVoxelAddress(label, v);
+								if (mask->data[q] == 0)
+								{
+									mask->data[q] = 1;
+									nlast++;
+									mask_nodes[nlast] = q;
+								}
+							}
+						}
+					}
+					ninic = mask_nodes[0] + 1;
+					mask_nodes[0] = nlast;
+				}
+			}
+
+			for (p = 0; p < n; p++)
+			{
+				size_t poff = (size_t)p * (size_t)nclasses;
+				int best = 0;
+				float bestv = flabel_1[poff];
+				for (k = 1; k < nclasses; k++)
+				{
+					float vprob = flabel_1[poff + (size_t)k];
+					if (vprob > bestv)
+					{
+						bestv = vprob;
+						best = k;
+					}
+				}
+				label->data[p] = class_labels[best];
+			}
+
+			free(Dpq);
 			free(flabel_1);
 			free(flabel_2);
 			free(mask_nodes);
