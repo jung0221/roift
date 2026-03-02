@@ -223,9 +223,15 @@ int main(int argc, char **argv)
     S = (int *)calloc((nseeds + 1), sizeof(int));
     S[0] = nseeds;
     j = 0;
+    bool corrected_negative_label = false;
     for (i = 0; i < nseeds; i++)
     {
         fscanf(fp, " %d %d %d %d %d", &x, &y, &z, &id, &lb);
+        if (lb < 0)
+        {
+            lb = 0;
+            corrected_negative_label = true;
+        }
         if (gft::Scene32::IsValidVoxel(scn, x, y, z))
         {
             p = gft::Scene32::GetVoxelAddress(scn, x, y, z);
@@ -236,6 +242,10 @@ int main(int argc, char **argv)
     }
     S[0] = j;
     fclose(fp);
+    if (corrected_negative_label)
+    {
+        std::cout << "Warning: negative seed labels were clamped to 0 (background)." << std::endl;
+    }
 
     start = clock();
 
@@ -250,17 +260,26 @@ int main(int argc, char **argv)
 
     gft::Scene32::Destroy(&scn);
 
-    DebugTimer::getInstance().startEvent("OIFT (Oriented Image Foresting Transform)");
-    gft::ift::OIFT(A, fscn, pol * 100.0, S, label);
-    DebugTimer::getInstance().endEvent("OIFT (Oriented Image Foresting Transform)");
+    DebugTimer::getInstance().startEvent("OIFT_Multi (Oriented Image Foresting Transform)");
+    gft::ift::OIFT_Multi(A, fscn, pol * 100.0, S, label);
+    DebugTimer::getInstance().endEvent("OIFT_Multi (Oriented Image Foresting Transform)");
 
-    DebugTimer::getInstance().startEvent("ORelax_1 (Relaxation - " + std::to_string(niter) + " iterations)");
-    gft::ift::ORelax_1(A, fscn, pol * 100.0, S, label, niter);
-    DebugTimer::getInstance().endEvent("ORelax_1 (Relaxation - " + std::to_string(niter) + " iterations)");
+    DebugTimer::getInstance().startEvent("ORelax_1_Multi (Relaxation - " + std::to_string(niter) + " iterations)");
+    gft::ift::ORelax_1_Multi(A, fscn, pol * 100.0, S, label, niter);
+    DebugTimer::getInstance().endEvent("ORelax_1_Multi (Relaxation - " + std::to_string(niter) + " iterations)");
 
-    DebugTimer::getInstance().startEvent("Dilation Conditional");
-    dilation_conditional(fscn, label, 1 /*radius sphere adj */, percentile /*percentile*/);
-    DebugTimer::getInstance().endEvent("Dilation Conditional");
+    int max_label = gft::Scene32::GetMaximumValue(label);
+    if (max_label <= 1)
+    {
+        DebugTimer::getInstance().startEvent("Dilation Conditional");
+        dilation_conditional(fscn, label, 1 /*radius sphere adj */, percentile /*percentile*/);
+        DebugTimer::getInstance().endEvent("Dilation Conditional");
+    }
+    else
+    {
+        std::cout << "Skipping binary dilation post-process for multi-label result (max label="
+                  << max_label << ")." << std::endl;
+    }
 
     gft::Scene32::Destroy(&fscn);
 

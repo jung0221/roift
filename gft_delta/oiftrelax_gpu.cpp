@@ -430,15 +430,24 @@ int main(int argc, char **argv)
     S = (int *)calloc((nseeds + 1), sizeof(int));
     S[0] = nseeds;
     j = 0;
+    int max_seed_label = 0;
+    bool corrected_negative_label = false;
     for (i = 0; i < nseeds; i++)
     {
         fscanf(fp, " %d %d %d %d %d", &x, &y, &z, &id, &lb);
+        if (lb < 0)
+        {
+            lb = 0;
+            corrected_negative_label = true;
+        }
         if (gft::Scene32::IsValidVoxel(scn, x, y, z))
         {
             p = gft::Scene32::GetVoxelAddress(scn, x, y, z);
             j++;
             S[j] = p;
             label->data[p] = lb;
+            if (lb > max_seed_label)
+                max_seed_label = lb;
         }
     }
     S[0] = j;
@@ -448,6 +457,20 @@ int main(int argc, char **argv)
     {
         std::cerr << "ERROR: No valid seeds found" << std::endl;
         return 1;
+    }
+
+    if (corrected_negative_label)
+    {
+        std::cout << "Warning: negative seed labels were clamped to 0 (background)." << std::endl;
+    }
+
+    const bool multilabel_mode = (max_seed_label > 1);
+    if (multilabel_mode)
+    {
+        use_gpu_oift = false;
+        use_gpu_orelax = false;
+        std::cout << "Multi-label seeds detected (max label=" << max_seed_label
+                  << "). Switching to CPU OIFT_Multi + ORelax_1_Multi for correctness." << std::endl;
     }
 
     std::cout << "Seeds loaded: " << j << " valid seeds" << std::endl;
@@ -513,9 +536,9 @@ int main(int argc, char **argv)
     }
     else
     {
-        DebugTimer::getInstance().startEvent("OIFT (CPU)");
-        gft::ift::OIFT(A, fscn, pol * 100.0, S, label);
-        DebugTimer::getInstance().endEvent("OIFT (CPU)");
+        DebugTimer::getInstance().startEvent("OIFT_Multi (CPU)");
+        gft::ift::OIFT_Multi(A, fscn, pol * 100.0, S, label);
+        DebugTimer::getInstance().endEvent("OIFT_Multi (CPU)");
     }
 
     // ORelax - GPU version (main speedup)
@@ -527,14 +550,23 @@ int main(int argc, char **argv)
     }
     else
     {
-        DebugTimer::getInstance().startEvent("ORelax_1 (CPU - " + std::to_string(niter) + " iterations)");
-        gft::ift::ORelax_1(A, fscn, pol * 100.0, S, label, niter);
-        DebugTimer::getInstance().endEvent("ORelax_1 (CPU - " + std::to_string(niter) + " iterations)");
+        DebugTimer::getInstance().startEvent("ORelax_1_Multi (CPU - " + std::to_string(niter) + " iterations)");
+        gft::ift::ORelax_1_Multi(A, fscn, pol * 100.0, S, label, niter);
+        DebugTimer::getInstance().endEvent("ORelax_1_Multi (CPU - " + std::to_string(niter) + " iterations)");
     }
 
-    DebugTimer::getInstance().startEvent("Dilation Conditional [CPU]");
-    dilation_conditional(fscn, label, 1, percentile);
-    DebugTimer::getInstance().endEvent("Dilation Conditional [CPU]");
+    int max_label = gft::Scene32::GetMaximumValue(label);
+    if (max_label <= 1)
+    {
+        DebugTimer::getInstance().startEvent("Dilation Conditional [CPU]");
+        dilation_conditional(fscn, label, 1, percentile);
+        DebugTimer::getInstance().endEvent("Dilation Conditional [CPU]");
+    }
+    else
+    {
+        std::cout << "Skipping binary dilation post-process for multi-label result (max label="
+                  << max_label << ")." << std::endl;
+    }
 
     gft::Scene32::Destroy(&fscn);
 
