@@ -168,6 +168,62 @@ void dilation_conditional(gft::sScene32 *scn, gft::sScene32 *label, float radius
     gft::Scene32::Destroy(&dilation_border);
 }
 
+// ==================== BOUNDARY SEED INJECTION ====================
+// Place background seeds (label=0) on all 6 volume faces to prevent
+// foreground labels from leaking to the image boundary.
+// Returns the number of boundary seeds added.
+int inject_boundary_seeds(gft::sScene32 *label, int *&S, int current_count, int stride)
+{
+    int xsize = label->xsize;
+    int ysize = label->ysize;
+    int zsize = label->zsize;
+
+    // Count how many boundary seeds we need (worst case: all face voxels)
+    std::vector<int> boundary_positions;
+
+    for (int z = 0; z < zsize; z += stride)
+    {
+        for (int y = 0; y < ysize; y += stride)
+        {
+            for (int x = 0; x < xsize; x += stride)
+            {
+                // Only process voxels on the 6 faces
+                bool on_face = (x == 0 || x == xsize - 1 ||
+                                y == 0 || y == ysize - 1 ||
+                                z == 0 || z == zsize - 1);
+                if (!on_face)
+                    continue;
+
+                int p = gft::Scene32::GetVoxelAddress(label, x, y, z);
+                // Only add if no existing seed
+                if (label->data[p] == NIL)
+                {
+                    label->data[p] = 0; // background
+                    boundary_positions.push_back(p);
+                }
+            }
+        }
+    }
+
+    // Reallocate S to fit new seeds
+    int n_new = boundary_positions.size();
+    if (n_new > 0)
+    {
+        int new_total = current_count + n_new;
+        int *S_new = (int *)calloc((new_total + 1), sizeof(int));
+        S_new[0] = new_total;
+        for (int i = 1; i <= current_count; i++)
+            S_new[i] = S[i];
+        for (int i = 0; i < n_new; i++)
+            S_new[current_count + 1 + i] = boundary_positions[i];
+        free(S);
+        S = S_new;
+    }
+
+    return n_new;
+}
+// ================================================================
+
 int main(int argc, char **argv)
 {
     gft::sScene32 *scn, *fscn, *label, *W, *Wx, *Wy, *Wz;
@@ -181,14 +237,17 @@ int main(int argc, char **argv)
     int niter = 50;
     float pol = 0.5;
     int percentile = 50;
+    int boundary_stride = 8;  // stride for boundary bg seeds (0 = disabled)
     char *output_file;
     if (argc < 7)
     {
         fprintf(stdout, "usage:\n");
-        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile>\n");
-        fprintf(stdout, "\t pol.... Boundary polarity. It can be in the range [-1.0, 1.0]\n");
-        fprintf(stdout, "\t niter.. Number of iterations of the relaxation procedure.\n");
-        fprintf(stdout, "\t output_file.. Output label file name (e.g., label.nii.gz)\n");
+        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile> <output_file> [boundary_stride]\n");
+        fprintf(stdout, "\t pol.............. Boundary polarity [-1.0, 1.0]\n");
+        fprintf(stdout, "\t niter............ Relaxation iterations (0 = unlimited)\n");
+        fprintf(stdout, "\t percentile...... Dilation percentile (binary mode only)\n");
+        fprintf(stdout, "\t output_file..... Output label file (e.g., label.nii.gz)\n");
+        fprintf(stdout, "\t boundary_stride. Stride for auto boundary bg seeds (default=8, 0=off)\n");
         exit(0);
     }
 
@@ -208,8 +267,8 @@ int main(int argc, char **argv)
     niter = atoi(argv[4]);
     percentile = atoi(argv[5]);
     output_file = argv[6];
-
-    std::cout << argv[6] << std::endl;
+    if (argc >= 8)
+        boundary_stride = atoi(argv[7]);
 
     // printf("pol: %f, niter: %d\n", pol, niter);
 
@@ -245,6 +304,15 @@ int main(int argc, char **argv)
     if (corrected_negative_label)
     {
         std::cout << "Warning: negative seed labels were clamped to 0 (background)." << std::endl;
+    }
+
+    // Inject background seeds on volume boundary faces
+    int n_boundary = 0;
+    if (boundary_stride > 0)
+    {
+        n_boundary = inject_boundary_seeds(label, S, j, boundary_stride);
+        std::cout << "Boundary seeds: " << n_boundary << " bg seeds added (stride="
+                  << boundary_stride << "), total seeds: " << S[0] << std::endl;
     }
 
     start = clock();
@@ -285,14 +353,12 @@ int main(int argc, char **argv)
 
     end = clock();
     totaltime = ((double)(end - start)) / CLOCKS_PER_SEC;
-    // printf("Time: %f sec\n", totaltime);
 
     DebugTimer::getInstance().printSummary();
 
     gft::Scene32::Write(label, output_file);
 
     free(S);
-    gft::Scene32::Destroy(&scn);
     gft::Scene32::Destroy(&label);
     gft::AdjRel3::Destroy(&A);
     return 0;
