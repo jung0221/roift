@@ -108,4 +108,5 @@ else()
     message(STATUS "oiftrelax source not found at ${OIFTRELAX_SRC}; not building oiftrelax")
 endif()
 
-# GPU versions (gft_delta, gft_par) removed — CPU oiftrelax only for now.
+# GPU OIFT: not feasible — IFT cost function is inherently sequential.
+# CPU oiftrelax is the only OIFT binary.
