@@ -110,7 +110,17 @@ namespace gft{
 		    float per,
 		    int *S,
 		    sScene32 *label);
-    
+
+    // Per-class polarity: per_class[c] is the polarity (already ×100) for label c.
+    // Array must have at least (max_label+1) entries.
+    // per_class[0] = background polarity.
+    void OIFT_Multi_PerClass(sAdjRel3 *A,
+                             sScene32 *scn,
+                             const float *per_class,
+                             int max_label,
+                             int *S,
+                             sScene32 *label);
+
     //Outer Cut:
     void OIFT(sScene32 *W,
 	      sAdjRel3 *A,
@@ -444,6 +454,15 @@ namespace gft{
 			int *S,
 			sScene32 *label,
 			int ntimes);
+
+    // Per-class polarity variant.
+    void ORelax_1_Multi_PerClass(sAdjRel3 *A,
+                                 sScene32 *scn,
+                                 const float *per_class,
+                                 int max_label,
+                                 int *S,
+                                 sScene32 *label,
+                                 int ntimes);
 
     void ORelax_1(sScene32 *W,
 		  sAdjRel3 *A,

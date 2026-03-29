@@ -242,12 +242,16 @@ int main(int argc, char **argv)
     if (argc < 7)
     {
         fprintf(stdout, "usage:\n");
-        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile> <output_file> [boundary_stride]\n");
-        fprintf(stdout, "\t pol.............. Boundary polarity [-1.0, 1.0]\n");
+        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile> <output_file> [boundary_stride] [pol_file]\n");
+        fprintf(stdout, "\t pol.............. Global boundary polarity [-1.0, 1.0] (ignored if pol_file given)\n");
         fprintf(stdout, "\t niter............ Relaxation iterations (0 = unlimited)\n");
         fprintf(stdout, "\t percentile...... Dilation percentile (binary mode only)\n");
         fprintf(stdout, "\t output_file..... Output label file (e.g., label.nii.gz)\n");
         fprintf(stdout, "\t boundary_stride. Stride for auto boundary bg seeds (default=8, 0=off)\n");
+        fprintf(stdout, "\t pol_file........ Per-class polarity file (optional). Format:\n");
+        fprintf(stdout, "\t                  Line 1: <n_labels>\n");
+        fprintf(stdout, "\t                  Line 2: pol_0 pol_1 pol_2 ... pol_{n-1}\n");
+        fprintf(stdout, "\t                  Values in [-1.0, 1.0]. pol_0 = background.\n");
         exit(0);
     }
 
@@ -269,6 +273,50 @@ int main(int argc, char **argv)
     output_file = argv[6];
     if (argc >= 8)
         boundary_stride = atoi(argv[7]);
+
+    // Per-class polarity file (optional 8th arg)
+    char *pol_file = NULL;
+    if (argc >= 9)
+        pol_file = argv[8];
+
+    // Parse per-class polarity file
+    std::vector<float> per_class_vec;
+    bool use_per_class = false;
+    if (pol_file != NULL)
+    {
+        FILE *pfp = fopen(pol_file, "r");
+        if (pfp != NULL)
+        {
+            int n_labels;
+            if (fscanf(pfp, " %d", &n_labels) == 1 && n_labels > 0)
+            {
+                per_class_vec.resize(n_labels);
+                bool ok = true;
+                for (int ci = 0; ci < n_labels; ci++)
+                {
+                    float pv;
+                    if (fscanf(pfp, " %f", &pv) != 1) { ok = false; break; }
+                    per_class_vec[ci] = pv * 100.0f;  // convert [-1,1] to [-100,100]
+                }
+                if (ok)
+                {
+                    use_per_class = true;
+                    std::cout << "Per-class polarity loaded: " << n_labels << " classes [";
+                    for (int ci = 0; ci < n_labels; ci++)
+                    {
+                        if (ci > 0) std::cout << ", ";
+                        std::cout << std::fixed << std::setprecision(2) << per_class_vec[ci] / 100.0f;
+                    }
+                    std::cout << "]" << std::endl;
+                }
+            }
+            fclose(pfp);
+        }
+        else
+        {
+            std::cerr << "Warning: could not open polarity file: " << pol_file << std::endl;
+        }
+    }
 
     // printf("pol: %f, niter: %d\n", pol, niter);
 
@@ -329,11 +377,27 @@ int main(int argc, char **argv)
     gft::Scene32::Destroy(&scn);
 
     DebugTimer::getInstance().startEvent("OIFT_Multi (Oriented Image Foresting Transform)");
-    gft::ift::OIFT_Multi(A, fscn, pol * 100.0, S, label);
+    if (use_per_class)
+    {
+        int ml = (int)per_class_vec.size() - 1;
+        gft::ift::OIFT_Multi_PerClass(A, fscn, per_class_vec.data(), ml, S, label);
+    }
+    else
+    {
+        gft::ift::OIFT_Multi(A, fscn, pol * 100.0, S, label);
+    }
     DebugTimer::getInstance().endEvent("OIFT_Multi (Oriented Image Foresting Transform)");
 
     DebugTimer::getInstance().startEvent("ORelax_1_Multi (Relaxation - " + std::to_string(niter) + " iterations)");
-    gft::ift::ORelax_1_Multi(A, fscn, pol * 100.0, S, label, niter);
+    if (use_per_class)
+    {
+        int ml = (int)per_class_vec.size() - 1;
+        gft::ift::ORelax_1_Multi_PerClass(A, fscn, per_class_vec.data(), ml, S, label, niter);
+    }
+    else
+    {
+        gft::ift::ORelax_1_Multi(A, fscn, pol * 100.0, S, label, niter);
+    }
     DebugTimer::getInstance().endEvent("ORelax_1_Multi (Relaxation - " + std::to_string(niter) + " iterations)");
 
     int max_label = gft::Scene32::GetMaximumValue(label);
