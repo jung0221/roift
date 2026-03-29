@@ -108,5 +108,13 @@ else()
     message(STATUS "oiftrelax source not found at ${OIFTRELAX_SRC}; not building oiftrelax")
 endif()
 
-# GPU OIFT: not feasible — IFT cost function is inherently sequential.
-# CPU oiftrelax is the only OIFT binary.
+# GPU fmax-OIFT (bottleneck path cost — parallelizable, unlike original OIFT)
+option(BUILD_GPU_OIFT "Build CUDA fmax-OIFT" ON)
+if(BUILD_GPU_OIFT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gpu")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        add_subdirectory(gpu)
+        message(STATUS "Building GPU fmax-OIFT in gpu/")
+    endif()
+endif()
