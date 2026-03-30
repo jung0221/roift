@@ -167,6 +167,14 @@ int main(int argc, char** argv)
     printf("Gaussian Blur 2x (CPU): %.1f ms\n", blur_ms);
 
     // Seed index array
+    if (S[0] == 0) {
+        fprintf(stderr, "No valid seeds — writing empty output\n");
+        gft::Scene32::Write(label, output_file);
+        free(S);
+        gft::Scene32::Destroy(&scn);
+        gft::Scene32::Destroy(&label);
+        return 0;
+    }
     std::vector<int> seed_indices(S[0]);
     for (int i = 0; i < S[0]; i++)
         seed_indices[i] = S[i + 1];

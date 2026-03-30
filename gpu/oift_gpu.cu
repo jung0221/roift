@@ -169,13 +169,22 @@ int oift_gpu_run(
     size_t sz_ull  = (size_t)n * sizeof(unsigned long long);
     size_t sz_pc   = (size_t)(max_label + 1) * sizeof(float);
 
-    cudaMalloc(&d_image,       sz_int);
-    cudaMalloc(&d_cost_label,  sz_ull);
-    cudaMalloc(&d_per_class,   sz_pc);
-    cudaMalloc(&d_frontier_a,  sz_int);
-    cudaMalloc(&d_frontier_b,  sz_int);
-    cudaMalloc(&d_n_frontier,  sizeof(int));
-    cudaMalloc(&d_in_frontier, sz_int);
+    #define CUDA_CHECK(call) do { \
+        cudaError_t err = (call); \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
+                    cudaGetErrorString(err)); \
+            return -1; \
+        } \
+    } while(0)
+
+    CUDA_CHECK(cudaMalloc(&d_image,       sz_int));
+    CUDA_CHECK(cudaMalloc(&d_cost_label,  sz_ull));
+    CUDA_CHECK(cudaMalloc(&d_per_class,   sz_pc));
+    CUDA_CHECK(cudaMalloc(&d_frontier_a,  sz_int));
+    CUDA_CHECK(cudaMalloc(&d_frontier_b,  sz_int));
+    CUDA_CHECK(cudaMalloc(&d_n_frontier,  sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_in_frontier, sz_int));
 
     cudaMemcpy(d_image,     h_image,     sz_int, cudaMemcpyHostToDevice);
     cudaMemcpy(d_per_class, h_per_class, sz_pc,  cudaMemcpyHostToDevice);
@@ -187,10 +196,17 @@ int oift_gpu_run(
 
     for (int i = 0; i < n_seeds; i++) {
         int p  = h_seeds[i];
+        if (p < 0 || p >= n) continue;  // bounds check
         int lb = h_labels[p];
         if (lb < 0) lb = 0;
+        if (lb > max_label) lb = 0;  // safety clamp
         h_cl[p] = PACK(0, lb);
         h_frontier.push_back(p);
+    }
+
+    if (h_frontier.empty()) {
+        // No valid seeds — return labels as-is (all NIL/0)
+        return 0;
     }
 
     cudaMemcpy(d_cost_label, h_cl.data(), sz_ull, cudaMemcpyHostToDevice);
@@ -232,16 +248,30 @@ int oift_gpu_run(
                 d_frontier_out, d_n_frontier, d_in_frontier);
 
         cudaDeviceSynchronize();
+        {
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "CUDA kernel error (iter %d): %s\n",
+                        total_iters, cudaGetErrorString(err));
+                break;
+            }
+        }
 
         total_iters++;
         cudaMemcpy(&h_frontier_size, d_n_frontier, sizeof(int), cudaMemcpyDeviceToHost);
+
+        // Safety: frontier can't exceed volume size
+        if (h_frontier_size > n) {
+            fprintf(stderr, "WARNING: frontier overflow (%d > %d), clamping\n",
+                    h_frontier_size, n);
+            h_frontier_size = n;
+        }
 
         int* tmp = d_frontier_in;
         d_frontier_in  = d_frontier_out;
         d_frontier_out = tmp;
 
-        if (total_iters <= 5 || total_iters % 100 == 0)
-            printf("  iter %d: frontier=%d\n", total_iters, h_frontier_size);
+        // Progress printing disabled for batch/training use
     }
 
     if (total_iters >= max_iters)
