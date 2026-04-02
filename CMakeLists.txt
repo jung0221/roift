@@ -118,3 +118,8 @@ if(BUILD_GPU_OIFT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gpu")
         message(STATUS "Building GPU fmax-OIFT in gpu/")
     endif()
 endif()
+
+# OIFT experiments
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experiments")
+    add_subdirectory(experiments)
+endif()
