@@ -238,11 +238,12 @@ int main(int argc, char **argv)
     float pol = 0.5;
     int percentile = 50;
     int boundary_stride = 8;  // stride for boundary bg seeds (0 = disabled)
+    int blur_passes = 2;      // Gaussian pre-smoothing passes (default 2 = historical double blur)
     char *output_file;
     if (argc < 7)
     {
         fprintf(stdout, "usage:\n");
-        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile> <output_file> [boundary_stride] [pol_file]\n");
+        fprintf(stdout, "oiftrelax <volume> <file_seeds> <pol> <niter> <percentile> <output_file> [boundary_stride] [pol_file] [--blur <n>]\n");
         fprintf(stdout, "\t pol.............. Global boundary polarity [-1.0, 1.0] (ignored if pol_file given)\n");
         fprintf(stdout, "\t niter............ Relaxation iterations (0 = unlimited)\n");
         fprintf(stdout, "\t percentile...... Dilation percentile (binary mode only)\n");
@@ -252,6 +253,9 @@ int main(int argc, char **argv)
         fprintf(stdout, "\t                  Line 1: <n_labels>\n");
         fprintf(stdout, "\t                  Line 2: pol_0 pol_1 pol_2 ... pol_{n-1}\n");
         fprintf(stdout, "\t                  Values in [-1.0, 1.0]. pol_0 = background.\n");
+        fprintf(stdout, "\t --blur <n>....... Gaussian pre-smoothing passes (default=2). 1=light, 0=off.\n");
+        fprintf(stdout, "\t                  Fewer passes preserve thin tubular structures (e.g.\n");
+        fprintf(stdout, "\t                  distal airways) that the double blur otherwise erases.\n");
         exit(0);
     }
 
@@ -271,13 +275,28 @@ int main(int argc, char **argv)
     niter = atoi(argv[4]);
     percentile = atoi(argv[5]);
     output_file = argv[6];
-    if (argc >= 8)
+    // Optional positional args 7 (boundary_stride) and 8 (pol_file). Skip them if
+    // they look like a named flag ("--...") or are empty, so flags such as --blur
+    // can follow the 6 required positional args directly.
+    if (argc >= 8 && argv[7][0] != '-' && argv[7][0] != '\0')
         boundary_stride = atoi(argv[7]);
 
     // Per-class polarity file (optional 8th arg)
     char *pol_file = NULL;
-    if (argc >= 9)
+    if (argc >= 9 && argv[8][0] != '-' && argv[8][0] != '\0')
         pol_file = argv[8];
+
+    // Named flag: --blur <n> (number of Gaussian pre-smoothing passes).
+    // Default 2 preserves the historical double-blur behavior; 1 = light, 0 = none.
+    for (int ai = 7; ai < argc; ai++)
+    {
+        if (std::string(argv[ai]) == "--blur" && ai + 1 < argc)
+        {
+            blur_passes = atoi(argv[ai + 1]);
+            if (blur_passes < 0)
+                blur_passes = 0;
+        }
+    }
 
     // Parse per-class polarity file
     std::vector<float> per_class_vec;
@@ -365,16 +384,32 @@ int main(int argc, char **argv)
 
     start = clock();
 
-    DebugTimer::getInstance().startEvent("GaussianBlur (1x)");
-    fscn = gft::Scene32::GaussianBlur(scn);
-    DebugTimer::getInstance().endEvent("GaussianBlur (1x)");
-
-    DebugTimer::getInstance().startEvent("GaussianBlur (2x)");
-    scn = fscn;
-    fscn = gft::Scene32::GaussianBlur(scn);
-    DebugTimer::getInstance().endEvent("GaussianBlur (2x)");
-
-    gft::Scene32::Destroy(&scn);
+    // Optional Gaussian pre-smoothing. Each pass smooths the previous result.
+    // blur_passes == 0 operates on the raw (intensity-corrected) volume, which
+    // preserves thin tubular structures the double blur would otherwise wash out
+    // before the OIFT boundary competition runs. The segmentation works on `fscn`;
+    // the read volume `scn` is freed here (or reused directly when no blur).
+    if (blur_passes <= 0)
+    {
+        std::cout << "Gaussian pre-smoothing: disabled (--blur 0)" << std::endl;
+        fscn = scn;  // operate on the read volume directly; freed later via fscn
+    }
+    else
+    {
+        gft::sScene32 *cur = scn;
+        for (int b = 0; b < blur_passes; b++)
+        {
+            std::string ev = "GaussianBlur (" + std::to_string(b + 1) + "x)";
+            DebugTimer::getInstance().startEvent(ev);
+            fscn = gft::Scene32::GaussianBlur(cur);
+            DebugTimer::getInstance().endEvent(ev);
+            if (cur != scn)
+                gft::Scene32::Destroy(&cur);  // free intermediate blur result
+            cur = fscn;
+        }
+        gft::Scene32::Destroy(&scn);  // free the original read volume
+        fscn = cur;
+    }
 
     DebugTimer::getInstance().startEvent("OIFT_Multi (Oriented Image Foresting Transform)");
     if (use_per_class)
