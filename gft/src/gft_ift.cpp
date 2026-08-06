@@ -988,6 +988,143 @@ namespace gft
 			PQueue32::Destroy(&Q);
 		}
 
+		// OIFT_Multi with optional, opt-in shape/thickness constraints on OBJECT growth.
+		// See gft_ift.h for the contract. pred==NULL && sdist==NULL => identical to
+		// OIFT_Multi. Both gates constrain only object labels (label>0); background
+		// competition and the oriented boundary-polarity weight are unchanged.
+		void OIFT_Multi_Constrained(sAdjRel3 *A,
+									sScene32 *scn,
+									float per,
+									int *S,
+									sScene32 *label,
+									sScene32 *pred,
+									sScene32 *sdist,
+									sScene32 *structId,
+									int dmax,
+									int geo_tiebreak,
+									int geo_tol)
+		{
+			sPQueue32 *Q = NULL;
+			int i, p, q, n;
+			int w, Wmax;
+			sScene32 *value;
+			gft::Voxel u, v;
+			float per_pq;
+			int *geo = NULL;  // accumulated hop-count geodesic distance from the conquering object seed
+
+			value = Scene32::Create(scn);
+			n = label->n;
+			Wmax = gft::Scene32::GetMaximumValue(scn);
+			Wmax *= (1.0 + fabsf(per) / 100.0);
+			Q = PQueue32::Create(Wmax + 2, n, value->data);
+
+			for (p = 0; p < n; p++)
+			{
+				if (label->data[p] == NIL)
+					value->data[p] = INT_MAX;
+				else
+					value->data[p] = 0;
+			}
+
+			// geo secondary key: 0 at object seeds (label>0), INT_MAX elsewhere. Opt-in only.
+			if (geo_tiebreak)
+			{
+				geo = gft::AllocIntArray(n);
+				for (p = 0; p < n; p++)
+					geo[p] = (label->data[p] != NIL && label->data[p] != 0) ? 0 : INT_MAX;
+			}
+
+			if (S != NULL)
+			{
+				for (i = 1; i <= S[0]; i++)
+					PQueue32::FastInsertElem(Q, S[i]);
+			}
+			else
+			{
+				for (p = 0; p < n; p++)
+					if (label->data[p] != NIL)
+						PQueue32::FastInsertElem(Q, p);
+			}
+
+			while (!PQueue32::IsEmpty(Q))
+			{
+				p = PQueue32::FastRemoveMinFIFO(Q);
+				u.c.x = gft::Scene32::GetAddressX(label, p);
+				u.c.y = gft::Scene32::GetAddressY(label, p);
+				u.c.z = gft::Scene32::GetAddressZ(label, p);
+
+				for (i = 1; i < A->n; i++)
+				{
+					v.v = u.v + A->d[i].v;
+					if (gft::Scene32::IsValidVoxel(label, v))
+					{
+						q = gft::Scene32::GetVoxelAddress(label, v);
+						if (Q->L.elem[q].color != BLACK)
+						{
+							// Local Band thickness gate: an object label may not grow
+							// beyond `dmax` from the internal-seed set. Background is free.
+							if (sdist != NULL && label->data[p] != 0 && sdist->data[q] > dmax)
+								continue;
+
+							// Cross-structure gate: an object may not conquer a voxel in a
+							// different, non-zero bone structure (thin necks severed in structId).
+							if (structId != NULL && label->data[p] != 0 &&
+								structId->data[q] != 0 && structId->data[q] != structId->data[p])
+								continue;
+
+							w = abs(scn->data[p] - scn->data[q]);
+
+							// Label 0 is background (external), labels > 0 are object classes (internal).
+							per_pq = (label->data[p] == 0) ? -per : per;
+
+							if (scn->data[p] > scn->data[q])
+								w *= (1.0 + per_pq / 100.0);
+							else if (scn->data[p] < scn->data[q])
+								w *= (1.0 - per_pq / 100.0);
+
+							// Geodesic Star Convexity (outer) gate: zero the arc toward the
+							// geodesic predecessor. Object conquers via arc p->q (pred[p]==q);
+							// background conquers via the reverse arc q->p (pred[q]==p).
+							if (pred != NULL)
+							{
+								if (label->data[p] != 0)
+								{
+									if (pred->data[p] == q)
+										w = 0;
+								}
+								else
+								{
+									if (pred->data[q] == p)
+										w = 0;
+								}
+							}
+
+							// Primary key is the oriented arc weight w (unchanged). Secondary key
+							// (object-only) breaks equal-w plateaus toward the nearer object seed.
+							bool win = (w < value->data[q]);
+							if (!win && geo_tiebreak && label->data[p] != 0 && geo[p] != INT_MAX &&
+								w <= value->data[q] + geo_tol && geo[p] + 1 < geo[q])
+								win = true;
+							if (win)
+							{
+								if (Q->L.elem[q].color == GRAY)
+									PQueue32::FastRemoveElem(Q, q);
+								value->data[q] = w;
+								label->data[q] = label->data[p];
+								if (geo_tiebreak)
+									geo[q] = (label->data[p] != 0 && geo[p] != INT_MAX) ? geo[p] + 1 : INT_MAX;
+								PQueue32::FastInsertElem(Q, q);
+							}
+						}
+					}
+				}
+			}
+			Scene32::Destroy(&value);
+			PQueue32::Destroy(&Q);
+			if (geo != NULL)
+				gft::FreeIntArray(&geo);
+		}
+
 		void OIFT_Multi_PerClass(sAdjRel3 *A,
 								sScene32 *scn,
 								const float *per_class,
