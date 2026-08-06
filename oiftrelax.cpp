@@ -224,6 +224,85 @@ int inject_boundary_seeds(gft::sScene32 *label, int *&S, int current_count, int 
 }
 // ================================================================
 
+// Per-voxel morphological gradient G(p) = max_{q in A(p)} |I(p)-I(q)|. Used as the
+// arc-cost image for the geodesic predecessor forest (SC_Pred_fsum), so geodesics run
+// cheaply through flat bone and expensively across boundaries. High at object surfaces.
+static gft::sScene32 *morph_gradient(gft::sScene32 *scn, gft::sAdjRel3 *A)
+{
+    gft::sScene32 *G = gft::Scene32::Create(scn);
+    gft::Voxel u, v;
+    for (int p = 0; p < scn->n; p++)
+    {
+        u.c.x = gft::Scene32::GetAddressX(scn, p);
+        u.c.y = gft::Scene32::GetAddressY(scn, p);
+        u.c.z = gft::Scene32::GetAddressZ(scn, p);
+        int gmax = 0;
+        for (int i = 1; i < A->n; i++)
+        {
+            v.v = u.v + A->d[i].v;
+            if (gft::Scene32::IsValidVoxel(scn, v))
+            {
+                int q = gft::Scene32::GetVoxelAddress(scn, v);
+                int d = abs(scn->data[p] - scn->data[q]);
+                if (d > gmax) gmax = d;
+            }
+        }
+        G->data[p] = gmax;
+    }
+    return G;
+}
+
+// 6-connected Dijkstra distance (mm) from the object-seed set. Approximate Euclidean
+// distance transform; used by the Local Band thickness cap. Unreached voxels get INT_MAX.
+static gft::sScene32 *seed_distance_mm(gft::sScene32 *tmpl, gft::sAdjRel3 *A, int *Sobj)
+{
+    int n = tmpl->n;
+    float *cost = gft::AllocFloatArray(n);
+    gft::sHeap *Q = gft::Heap::Create(n, cost);
+    float *Dpq = (float *)malloc(A->n * sizeof(float));
+    for (int i = 1; i < A->n; i++)
+        Dpq[i] = sqrtf(A->d[i].axis.x * A->d[i].axis.x * tmpl->dx * tmpl->dx +
+                       A->d[i].axis.y * A->d[i].axis.y * tmpl->dy * tmpl->dy +
+                       A->d[i].axis.z * A->d[i].axis.z * tmpl->dz * tmpl->dz);
+    for (int p = 0; p < n; p++)
+        cost[p] = FLT_MAX;
+    for (int i = 1; i <= Sobj[0]; i++)
+    {
+        cost[Sobj[i]] = 0.0f;
+        gft::Heap::Insert_MinPolicy(Q, Sobj[i]);
+    }
+    gft::Voxel u, v;
+    int p, q;
+    while (!gft::Heap::IsEmpty(Q))
+    {
+        gft::Heap::Remove_MinPolicy(Q, &p);
+        u.c.x = gft::Scene32::GetAddressX(tmpl, p);
+        u.c.y = gft::Scene32::GetAddressY(tmpl, p);
+        u.c.z = gft::Scene32::GetAddressZ(tmpl, p);
+        for (int i = 1; i < A->n; i++)
+        {
+            v.v = u.v + A->d[i].v;
+            if (gft::Scene32::IsValidVoxel(tmpl, v))
+            {
+                q = gft::Scene32::GetVoxelAddress(tmpl, v);
+                if (Q->color[q] != BLACK)
+                {
+                    float tmp = cost[p] + Dpq[i];
+                    if (tmp < cost[q])
+                        gft::Heap::Update_MinPolicy(Q, q, tmp);
+                }
+            }
+        }
+    }
+    gft::sScene32 *D = gft::Scene32::Create(tmpl);
+    for (int p2 = 0; p2 < n; p2++)
+        D->data[p2] = (cost[p2] >= FLT_MAX) ? INT_MAX : (int)(cost[p2] + 0.5f);
+    free(Dpq);
+    gft::FreeFloatArray(&cost);
+    gft::Heap::Destroy(&Q);
+    return D;
+}
+
 int main(int argc, char **argv)
 {
     gft::sScene32 *scn, *fscn, *label, *W, *Wx, *Wy, *Wz;
@@ -239,6 +318,14 @@ int main(int argc, char **argv)
     int percentile = 50;
     int boundary_stride = 8;  // stride for boundary bg seeds (0 = disabled)
     int blur_passes = 2;      // Gaussian pre-smoothing passes (default 2 = historical double blur)
+    bool use_gsc = false;     // --gsc: Geodesic Star Convexity shape gate (opt-in)
+    float gsc_power = 1.0f;    // --gsc [power]: geodesic contrast exponent
+    bool use_band = false;    // --band: Local Band object-thickness cap (opt-in)
+    int band_dmax = 0;        // --band <dmax_mm>: max object distance (mm) from internal seeds
+    char *dist_file = NULL;   // --dist-file: external distance field for the band gate (e.g. atlas-shaped)
+    char *struct_file = NULL; // --struct-file: per-voxel bone structure-ID field for the cross-structure gate (opt-in)
+    bool use_geo_tiebreak = false;  // --geo-tiebreak: geodesic plateau tie-break on object conquest (opt-in)
+    int geo_tol = 0;                // --geo-tol N: near-equal arc tolerance for the geodesic tie-break (default 0 = exact)
     char *output_file;
     if (argc < 7)
     {
@@ -256,6 +343,26 @@ int main(int argc, char **argv)
         fprintf(stdout, "\t --blur <n>....... Gaussian pre-smoothing passes (default=2). 1=light, 0=off.\n");
         fprintf(stdout, "\t                  Fewer passes preserve thin tubular structures (e.g.\n");
         fprintf(stdout, "\t                  distal airways) that the double blur otherwise erases.\n");
+        fprintf(stdout, "\t --gsc [power].... Geodesic Star Convexity shape gate (opt-in, default off).\n");
+        fprintf(stdout, "\t                  Constrains the object to be star-convex w.r.t. the internal\n");
+        fprintf(stdout, "\t                  seeds; curbs leaks through gradient-free junctions. power\n");
+        fprintf(stdout, "\t                  = geodesic contrast exponent (default 1.0).\n");
+        fprintf(stdout, "\t --band <dmax>.... Local Band thickness cap (opt-in, default off). Object may\n");
+        fprintf(stdout, "\t                  not grow beyond dmax mm from the internal seeds.\n");
+        fprintf(stdout, "\t --dist-file <f>.. External distance field (NIfTI) for the band gate instead\n");
+        fprintf(stdout, "\t                  of the seed distance; e.g. distance from a warped-atlas rib\n");
+        fprintf(stdout, "\t                  shape, so --band walls growth to the atlas anatomy.\n");
+        fprintf(stdout, "\t --struct-file <f> Per-voxel structure-ID field (NIfTI, 0 = none) for the\n");
+        fprintf(stdout, "\t                  cross-structure gate (opt-in, default off). An object may not\n");
+        fprintf(stdout, "\t                  conquer a voxel belonging to a different, non-zero structure;\n");
+        fprintf(stdout, "\t                  growth into id 0 (soft tissue / marrow) stays allowed.\n");
+        fprintf(stdout, "\t --geo-tiebreak... Geodesic plateau tie-break (opt-in, default off). On an\n");
+        fprintf(stdout, "\t                  equal-weight object conquest the geodesically nearest seed\n");
+        fprintf(stdout, "\t                  wins, so inter-object boundaries in uniform regions fall on\n");
+        fprintf(stdout, "\t                  the watershed line instead of arbitrary queue order.\n");
+        fprintf(stdout, "\t --geo-tol <N>.... Tolerance for --geo-tiebreak (default 0 = exact tie). Admits\n");
+        fprintf(stdout, "\t                  near-equal arcs (cost within N) so a geodesically closer seed\n");
+        fprintf(stdout, "\t                  can re-conquer; approximates a geodesic/watershed partition.\n");
         exit(0);
     }
 
@@ -295,6 +402,38 @@ int main(int argc, char **argv)
             blur_passes = atoi(argv[ai + 1]);
             if (blur_passes < 0)
                 blur_passes = 0;
+        }
+        else if (std::string(argv[ai]) == "--gsc")
+        {
+            use_gsc = true;
+            // Optional numeric power argument (default 1.0).
+            if (ai + 1 < argc)
+            {
+                char c = argv[ai + 1][0];
+                if ((c >= '0' && c <= '9') || c == '.')
+                    gsc_power = atof(argv[ai + 1]);
+            }
+        }
+        else if (std::string(argv[ai]) == "--band" && ai + 1 < argc)
+        {
+            use_band = true;
+            band_dmax = atoi(argv[ai + 1]);
+        }
+        else if (std::string(argv[ai]) == "--dist-file" && ai + 1 < argc)
+        {
+            dist_file = argv[ai + 1];
+        }
+        else if (std::string(argv[ai]) == "--struct-file" && ai + 1 < argc)
+        {
+            struct_file = argv[ai + 1];
+        }
+        else if (std::string(argv[ai]) == "--geo-tiebreak")
+        {
+            use_geo_tiebreak = true;
+        }
+        else if (std::string(argv[ai]) == "--geo-tol" && ai + 1 < argc)
+        {
+            geo_tol = atoi(argv[ai + 1]);
         }
     }
 
@@ -412,7 +551,75 @@ int main(int argc, char **argv)
     }
 
     DebugTimer::getInstance().startEvent("OIFT_Multi (Oriented Image Foresting Transform)");
-    if (use_per_class)
+    if (use_gsc || use_band || use_geo_tiebreak || struct_file != NULL)
+    {
+        // Build the object-only (label>0) seed set that roots the shape constraints.
+        int *Sobj = (int *)calloc(S[0] + 1, sizeof(int));
+        int nobj = 0;
+        for (int si = 1; si <= S[0]; si++)
+            if (label->data[S[si]] > 0)
+                Sobj[++nobj] = S[si];
+        Sobj[0] = nobj;
+
+        gft::sScene32 *pred = NULL;
+        gft::sScene32 *sdist = NULL;
+        gft::sScene32 *structId = NULL;
+        if (use_gsc)
+        {
+            if (use_per_class)
+                std::cout << "Note: --gsc uses global polarity (" << pol
+                          << "); per-class polarity ignored for the shape gate." << std::endl;
+            gft::sScene32 *G = morph_gradient(fscn, A);
+            pred = gft::ift::SC_Pred_fsum(G, A, Sobj, gsc_power);
+            gft::Scene32::Destroy(&G);
+            std::cout << "GSC enabled: geodesic star-convexity gate (power=" << gsc_power
+                      << ", " << nobj << " object seeds)." << std::endl;
+        }
+        if (use_band)
+        {
+            if (dist_file != NULL)
+            {
+                // External distance field (e.g. distance from a warped-atlas rib shape):
+                // the band walls object growth to within band_dmax mm of that shape,
+                // rather than of the sparse seed cores. Must match the volume dimensions.
+                sdist = gft::Scene32::Read(dist_file);
+                if (sdist == NULL || sdist->n != label->n)
+                {
+                    std::cerr << "Error: --dist-file dimensions do not match volume (or unreadable): "
+                              << dist_file << std::endl;
+                    exit(1);
+                }
+                std::cout << "Local Band (external dist-file): cap dmax=" << band_dmax
+                          << " mm from " << dist_file << std::endl;
+            }
+            else
+            {
+                sdist = seed_distance_mm(fscn, A, Sobj);
+                std::cout << "Local Band enabled: object thickness cap dmax=" << band_dmax << " mm." << std::endl;
+            }
+        }
+        if (struct_file != NULL)
+        {
+            // Per-voxel bone structure IDs (0 = none): the cross-structure gate forbids an
+            // object from conquering a voxel that belongs to a different, non-zero structure.
+            structId = gft::Scene32::Read(struct_file);
+            if (structId == NULL || structId->n != label->n)
+            {
+                std::cerr << "Error: --struct-file dimensions do not match volume (or unreadable): "
+                          << struct_file << std::endl;
+                exit(1);
+            }
+            std::cout << "Cross-structure gate enabled: " << struct_file << std::endl;
+        }
+        if (use_geo_tiebreak)
+            std::cout << "Geodesic tie-break enabled: equal-weight object plateaus resolved by nearest seed (tol=" << geo_tol << ")." << std::endl;
+        gft::ift::OIFT_Multi_Constrained(A, fscn, pol * 100.0, S, label, pred, sdist, structId, band_dmax, use_geo_tiebreak ? 1 : 0, geo_tol);
+        if (pred != NULL) gft::Scene32::Destroy(&pred);
+        if (sdist != NULL) gft::Scene32::Destroy(&sdist);
+        if (structId != NULL) gft::Scene32::Destroy(&structId);
+        free(Sobj);
+    }
+    else if (use_per_class)
     {
         int ml = (int)per_class_vec.size() - 1;
         gft::ift::OIFT_Multi_PerClass(A, fscn, per_class_vec.data(), ml, S, label);
@@ -424,7 +631,7 @@ int main(int argc, char **argv)
     DebugTimer::getInstance().endEvent("OIFT_Multi (Oriented Image Foresting Transform)");
 
     DebugTimer::getInstance().startEvent("ORelax_1_Multi (Relaxation - " + std::to_string(niter) + " iterations)");
-    if (use_per_class)
+    if (use_per_class && !(use_gsc || use_band))
     {
         int ml = (int)per_class_vec.size() - 1;
         gft::ift::ORelax_1_Multi_PerClass(A, fscn, per_class_vec.data(), ml, S, label, niter);
