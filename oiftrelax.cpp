@@ -169,8 +169,9 @@ void dilation_conditional(gft::sScene32 *scn, gft::sScene32 *label, float radius
 }
 
 // ==================== BOUNDARY SEED INJECTION ====================
-// Place background seeds (label=0) on the volume faces, the four edges of a one-slice
-// volume, so foreground labels cannot leak to the boundary.
+// Place background seeds (label=0) on the stride lattice of the volume faces, taking a
+// face only along an axis longer than one voxel, so foreground labels cannot leak to
+// the boundary.
 // Returns the number of boundary seeds added.
 int inject_boundary_seeds(gft::sScene32 *label, int *&S, int current_count, int stride)
 {
@@ -187,7 +188,6 @@ int inject_boundary_seeds(gft::sScene32 *label, int *&S, int current_count, int 
         {
             for (int x = 0; x < xsize; x += stride)
             {
-                // Only process voxels on the 6 faces
                 // A face exists only along an axis longer than one voxel: in a one-slice
                 // volume every voxel has z == 0 == zsize - 1.
                 bool on_face = (xsize > 1 && (x == 0 || x == xsize - 1)) ||
@@ -338,7 +338,7 @@ int main(int argc, char **argv)
         fprintf(stdout, "\t percentile...... Dilation percentile (binary mode only)\n");
         fprintf(stdout, "\t output_file..... Output label file (e.g., label.nii.gz)\n");
         fprintf(stdout, "\t boundary_stride. Stride for auto boundary bg seeds (default=8, 0=off)\n");
-        fprintf(stdout, "\t                  On a one-slice volume only the four edges are faces.\n");
+        fprintf(stdout, "\t                  A one-slice volume is seeded on its edges, not across the plane.\n");
         fprintf(stdout, "\t pol_file........ Per-class polarity file (optional). Format:\n");
         fprintf(stdout, "\t                  Line 1: <n_labels>\n");
         fprintf(stdout, "\t                  Line 2: pol_0 pol_1 pol_2 ... pol_{n-1}\n");
