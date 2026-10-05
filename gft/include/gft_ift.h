@@ -121,6 +121,39 @@ namespace gft{
                              int *S,
                              sScene32 *label);
 
+    // OIFT_Multi with optional, opt-in shape/thickness constraints on OBJECT growth.
+    //   pred  != NULL : Geodesic Star Convexity (GSC) gate. Faithful inline port of
+    //                   Orient2DigraphOuter + the OIFT digraph consumption (object uses
+    //                   arc p->q, background uses reverse q->p): the arc toward each
+    //                   node's geodesic predecessor is zeroed, forcing predecessor
+    //                   closure so the object is geodesic-star-convex w.r.t. the internal
+    //                   seeds. `pred` = SC_Pred_fsum(gradient, A, S_object, power).
+    //   sdist != NULL : Local Band thickness gate. Object may not conquer a voxel whose
+    //                   `sdist` (distance from the internal-seed set) exceeds `dmax`.
+    //   structId!=NULL: Cross-structure gate. Per-voxel bone structure ID (0 = none);
+    //                   an object may not conquer a voxel that belongs to a different,
+    //                   non-zero structure. Growing into structId==0 (soft tissue /
+    //                   marrow) stays allowed. Hard veto, object-only.
+    //   geo_tiebreak  : when !=0, on an equal-weight OBJECT conquest the geodesically
+    //                   (hop-count) nearest seed wins, so plateau boundaries fall on the
+    //                   watershed line instead of arbitrary FIFO order. Object-only.
+    //   geo_tol       : tolerance for the tie-break; a candidate arc within geo_tol of q's
+    //                   current cost is admitted if geodesically closer. geo_tol==0 is the
+    //                   exact-tie behavior. Only meaningful when geo_tiebreak!=0.
+    // With pred==NULL, sdist==NULL, structId==NULL and geo_tiebreak==0 this is identical
+    // to OIFT_Multi.
+    void OIFT_Multi_Constrained(sAdjRel3 *A,
+                                sScene32 *scn,
+                                float per,
+                                int *S,
+                                sScene32 *label,
+                                sScene32 *pred,
+                                sScene32 *sdist,
+                                sScene32 *structId,
+                                int dmax,
+                                int geo_tiebreak,
+                                int geo_tol);
+
     //Outer Cut:
     void OIFT(sScene32 *W,
 	      sAdjRel3 *A,

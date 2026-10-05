@@ -32,7 +32,11 @@ static int inject_boundary_seeds(gft::sScene32* label, int*& S, int current_coun
     for (int z = 0; z < zsize; z += stride)
         for (int y = 0; y < ysize; y += stride)
             for (int x = 0; x < xsize; x += stride) {
-                bool on_face = (x==0||x==xsize-1||y==0||y==ysize-1||z==0||z==zsize-1);
+                // A face exists only along an axis longer than one voxel: in a one-slice
+                // volume every voxel has z == 0 == zsize - 1.
+                bool on_face = (xsize > 1 && (x == 0 || x == xsize - 1)) ||
+                               (ysize > 1 && (y == 0 || y == ysize - 1)) ||
+                               (zsize > 1 && (z == 0 || z == zsize - 1));
                 if (!on_face) continue;
                 int p = gft::Scene32::GetVoxelAddress(label, x, y, z);
                 if (label->data[p] == NIL) {
