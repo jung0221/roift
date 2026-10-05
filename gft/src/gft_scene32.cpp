@@ -529,6 +529,12 @@ namespace gft{
     int p;
   
     nii = nifti_image_read( filename , 1 );
+    // A 2D header is one slice. nifti2_io leaves dim[3] and pixdim[3] unsanitised
+    // past dim[0], and the blur kernel divides by min(dx, dy, dz).
+    if( nii->dim[ 0 ] == 2 ) {
+      nii->nz = nii->dim[ 3 ] = 1;
+      nii->dz = nii->pixdim[ 3 ] = MAX( nii->dx, nii->dy );
+    }
     scn = Create( nii->nx, nii->ny, nii->nz );
     scn->dx = nii->dx;
     scn->dy = nii->dy;
@@ -540,7 +546,7 @@ namespace gft{
 	( nii->datatype == NIFTI_TYPE_RGB24 ) ||
 	( nii->datatype == NIFTI_TYPE_RGB24 ) ||
 	( nii->datatype >= NIFTI_TYPE_UINT32 ) ||
-	( nii->dim[ 0 ] < 3 ) || ( nii->dim[ 0 ] > 4 ) ) {
+	( nii->dim[ 0 ] < 2 ) || ( nii->dim[ 0 ] > 4 ) ) {
       printf( "Error: Data format not supported, or header is corrupted.\n" );
       printf( "Data that is NOT supported: complex, double, RGB, unsigned integer of 32 bits, temporal series and statistical images.\n" );
       exit( -1 );
